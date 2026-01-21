@@ -23,8 +23,9 @@ const toTitle = (text: string) => (text.length ? text : '—')
 const detectRtl = (language: Language) => (language === 'he' ? 'rtl' : 'ltr')
 
 export default function App() {
+  const envApiBase = import.meta.env.VITE_API_BASE_URL as string | undefined
   const [apiBase, setApiBase] = useState(
-    localStorage.getItem('apiBase') ?? 'http://localhost:8000'
+    envApiBase ?? localStorage.getItem('apiBase') ?? 'http://localhost:8000'
   )
   const [file, setFile] = useState<File | null>(null)
   const [transcript, setTranscript] = useState('')
