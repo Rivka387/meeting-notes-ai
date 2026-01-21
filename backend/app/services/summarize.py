@@ -78,23 +78,24 @@ def _default_response(language: str) -> Dict[str, Any]:
 def _mock_response(language: str) -> Dict[str, Any]:
     return {
         "summary": (
-            "דנו ביעדי ה-MVP למערכת תמלול וסיכום פגישות ובחלוקה בין רכיבי המערכת. "
-            "הוחלט להשתמש ב-Whisper לתמלול וב-Gemini לסיכום, עם UI ב-React ושרת FastAPI. "
-            "הוסכם שהמערכת תחזיר תמלול מלא, סיכום, משתתפים, החלטות ומשימות לביצוע. "
-            "נדרש גם ייצוא לקובץ Word והדגמה מקומית עם אפשרות ל-MOCK_MODE."
+            "The team aligned on a minimal meeting-notes MVP that supports upload, transcription, summary, "
+            "and Word export. The backend will be FastAPI with dedicated routes, and the frontend will "
+            "present summary, participants, decisions, and action items in a clean UI. The plan is to use "
+            "a Whisper-compatible API for transcription and an LLM for JSON-structured summaries. "
+            "MOCK_MODE stays in place for demos without API keys. Documentation will be finalized in README "
+            "and PROCESS.md."
         ),
-        "participants": ["נועה", "אורן", "דניאל"],
+        "participants": ["Oren", "Maya", "Dan"],
         "decisions": [
-            "ה-MVP יכלול React בפרונט ו-FastAPI בבקאנד.",
-            "תמלול יתבצע באמצעות Whisper עם אפשרות MOCK_MODE לדמו.",
-            "סיכום יתבצע באמצעות Gemini ויוחזר כ-JSON תקין.",
-            "נוסיף ייצוא לקובץ Word מתוך ממשק המשתמש.",
+            "Use a Whisper-compatible API for transcription.",
+            "Use an LLM with JSON schema for summaries.",
+            "Keep MOCK_MODE for demos without external keys.",
+            "Export the results to Word from the UI.",
         ],
         "actionItems": [
-            "נועה: לנסח System Prompt איכותי לסיכום.",
-            "אורן: לממש את ה-routes ושירותי הבקאנד.",
-            "דניאל: לבנות UI נקי להצגת תמלול וסיכום.",
-            "צוות: להשלים README ו-PROCESS.md עם הוראות והרצת דמו.",
+            "Oren: finalize backend routes for transcribe, summarize, and export.",
+            "Maya: implement the React UI flow and loading states.",
+            "Dan: document setup steps and AI prompts in README and PROCESS.md.",
         ],
         "language": language,
     }
@@ -102,13 +103,10 @@ def _mock_response(language: str) -> Dict[str, Any]:
 
 async def summarize_meeting(transcript: str, language_hint: str | None) -> Dict[str, Any]:
     language = language_hint or ("en" if transcript.isascii() else "he")
-    mock_mode = os.getenv("MOCK_MODE", "false").lower() == "true"
     api_key = os.getenv("GEMINI_API_KEY")
 
-    if mock_mode and not api_key:
-        return _mock_response(language)
     if not api_key:
-        return _default_response(language)
+        raise SummarizationError("Missing GEMINI_API_KEY. Set it to enable summaries.")
 
     genai.configure(api_key=api_key)
     model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")

@@ -21,24 +21,27 @@ def _detect_language(text: str) -> str:
     return "en" if en_count > he_count else "he"
 
 
-async def transcribe_audio(file: UploadFile) -> Tuple[str, str]:
-    mock_mode = os.getenv("MOCK_MODE", "false").lower() == "true"
+async def transcribe_audio(file: UploadFile, mock_override: bool | None = None) -> Tuple[str, str]:
+    env_mock = os.getenv("MOCK_MODE", "false").lower() == "true"
+    mock_mode = env_mock if mock_override is None else mock_override
     api_url = os.getenv("WHISPER_API_URL")
     api_key = os.getenv("WHISPER_API_KEY")
     model = os.getenv("WHISPER_MODEL", "whisper-1")
 
-    if mock_mode or not api_url or not api_key:
+    if mock_mode:
         transcript = (
             "נועה: בוקר טוב, ניישר קו על ה-MVP של מערכת תמלול וסיכום פגישות.\n"
             "אורן: היעד הוא חוויית משתמש פשוטה: העלאת קובץ, תמלול, סיכום, והורדה ל-Word.\n"
             "דניאל: בפרונט נציג תמלול מלא, סיכום, משתתפים, החלטות ומשימות.\n"
-            "נועה: לתמלול נשתמש ב-Whisper, ולסיכום ב-Gemini, עם אפשרות MOCK_MODE לדמו.\n"
+            "נועה: נשתמש ב-Whisper לתמלול וב-Gemini לסיכום, ונפעיל מצב דמו לצורך בדיקות.\n"
             "אורן: בבקאנד נבנה routes ל-transcribe, summarize ו-export/docx.\n"
-            "דניאל: אטפל ב-UI נקי וברור, עם מצב טעינה ושגיאות ידידותיות.\n"
-            "נועה: נעדכן README עם הוראות הרצה ו-PROCESS.md עם התכנון והשימוש ב-AI.\n"
-            "אורן: נוודא שה-JSON חוזר במבנה תקין ונוסיף סכמת response.\n"
+            "דניאל: נוסיף UI ברור ונקפיד על תיעוד רידמי ו-PROCESS.md.\n"
         )
         return transcript, _detect_language(transcript)
+    if not api_url or not api_key:
+        raise TranscriptionError(
+            "Missing WHISPER_API_URL/WHISPER_API_KEY. Set them or enable mock mode."
+        )
 
     content = await file.read()
     files = {"file": (file.filename or "audio.wav", content, file.content_type)}

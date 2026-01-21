@@ -20,8 +20,6 @@ const defaultSummary: SummaryPayload = {
   language: 'he',
 }
 
-const detectRtl = (language: Language) => (language === 'he' ? 'rtl' : 'ltr')
-
 type ToastState = {
   message: string
   tone?: 'success' | 'error' | 'info'
@@ -32,6 +30,10 @@ export default function App() {
   const [apiBase, setApiBase] = useState(
     envApiBase ?? localStorage.getItem('apiBase') ?? 'http://localhost:8000'
   )
+  const [mockMode, setMockMode] = useState(() => {
+    const stored = localStorage.getItem('mockMode')
+    return stored ? stored === 'true' : true
+  })
   const [file, setFile] = useState<File | null>(null)
   const [transcript, setTranscript] = useState('')
   const [language, setLanguage] = useState<Language>('he')
@@ -90,6 +92,11 @@ export default function App() {
     localStorage.setItem('apiBase', value)
   }
 
+  const persistMockMode = (value: boolean) => {
+    setMockMode(value)
+    localStorage.setItem('mockMode', String(value))
+  }
+
   const handleUpload = async () => {
     if (!file) return
     setLoading(true)
@@ -105,6 +112,7 @@ export default function App() {
     try {
       const transcribeRes = await fetch(`${apiBase}/api/transcribe`, {
         method: 'POST',
+        headers: { 'X-Mock-Mode': mockMode ? 'true' : 'false' },
         body: formData,
       })
 
@@ -250,7 +258,7 @@ export default function App() {
   ]
 
   return (
-    <div className="app" dir={detectRtl(language)}>
+    <div className="app" dir="rtl">
       <div className="bg-orb" aria-hidden="true" />
       <Header
         title="תמלול וסיכום פגישות בצורה חכמה"
@@ -261,10 +269,18 @@ export default function App() {
         <UploadPanel
           fileName={file?.name ?? null}
           apiBase={apiBase}
+          mockMode={mockMode}
+          mockModeLabel={mockMode ? 'תמלול דמו פעיל' : 'תמלול חי פעיל'}
+          mockModeHint={
+            mockMode
+              ? 'עובד בלי מפתחות תמלול. הסיכום נשאר אמיתי עם Gemini.'
+              : 'דורש מפתחות תמלול תקינים. הסיכום תמיד אמיתי עם Gemini.'
+          }
           loading={loading}
           stage={stage}
           onFileChange={setFile}
           onApiBaseChange={persistApiBase}
+          onMockModeChange={persistMockMode}
           onStart={handleUpload}
         />
         <ProgressStepper steps={progressSteps} activeIndex={progressStep} label={progressLabel} />

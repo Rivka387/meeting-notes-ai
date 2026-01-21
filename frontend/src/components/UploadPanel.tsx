@@ -1,20 +1,28 @@
 type UploadPanelProps = {
   fileName: string | null
   apiBase: string
+  mockMode: boolean
+  mockModeLabel: string
+  mockModeHint: string
   loading: boolean
   stage: 'idle' | 'transcribing' | 'summarizing'
   onFileChange: (file: File | null) => void
   onApiBaseChange: (value: string) => void
+  onMockModeChange: (value: boolean) => void
   onStart: () => void
 }
 
 export default function UploadPanel({
   fileName,
   apiBase,
+  mockMode,
+  mockModeLabel,
+  mockModeHint,
   loading,
   stage,
   onFileChange,
   onApiBaseChange,
+  onMockModeChange,
   onStart,
 }: UploadPanelProps) {
   const buttonLabel = loading
@@ -47,6 +55,20 @@ export default function UploadPanel({
           placeholder="http://localhost:8000"
         />
       </label>
+      <div className="mode-toggle">
+        <div className="mode-copy">
+          <span className="mode-title">{mockModeLabel}</span>
+          <span className="mode-hint">{mockModeHint}</span>
+        </div>
+        <label className="switch">
+          <input
+            type="checkbox"
+            checked={mockMode}
+            onChange={(event) => onMockModeChange(event.target.checked)}
+          />
+          <span className="switch-track" aria-hidden="true" />
+        </label>
+      </div>
       <button className="btn primary" onClick={onStart} disabled={loading || !fileName}>
         {buttonLabel}
       </button>

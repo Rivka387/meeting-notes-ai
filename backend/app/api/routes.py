@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.schemas.meeting import (
@@ -18,11 +18,23 @@ router = APIRouter()
 def health() -> dict:
     return {"status": "ok"}
 
+def _parse_mock_mode(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
 
 @router.post("/api/transcribe", response_model=TranscribeResponse)
-async def transcribe(file: UploadFile = File(...)) -> TranscribeResponse:
+async def transcribe(
+    file: UploadFile = File(...), x_mock_mode: str | None = Header(default=None)
+) -> TranscribeResponse:
     try:
-        transcript, language = await transcribe_audio(file)
+        transcript, language = await transcribe_audio(file, _parse_mock_mode(x_mock_mode))
         return TranscribeResponse(transcript=transcript, language=language)
     except TranscriptionError as exc:
         raise HTTPException(status_code=502, detail=exc.message)

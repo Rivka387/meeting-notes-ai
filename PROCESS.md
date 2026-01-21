@@ -1,36 +1,25 @@
 # PROCESS
 
-## תכנון לפני כתיבת קוד
-1. להגדיר את הזרימה מקצה לקצה: העלאת אודיו -> תמלול -> סיכום -> הצגה -> ייצוא Word.
-2. לבחור טכנולוגיות: FastAPI + React + Whisper (או API חלופי) + Gemini לסיכום.
-3. להגדיר סכמת JSON קשיחה לסיכום כדי למנוע שגיאות פרסור.
-4. להחליט על חוויית משתמש: מסך יחיד, סטטוסים (מתמלל/מסכם), שגיאות ידידותיות.
-5. להוסיף מצב MOCK_MODE לדמו מקומי ללא מפתחות.
+## Planning
+- Mapped the required outputs (transcript, summary, participants, decisions, action items, Word export).
+- Designed a simple flow: upload audio -> transcribe -> summarize -> present -> export.
+- Chose FastAPI for a thin API layer, React for the UI, Whisper-compatible API for transcription, and Gemini for the LLM summary.
 
-## שימוש ב-AI בתהליך (דוגמאות פרומפטים)
-- "בנה לי System Prompt שמחזיר JSON בלבד עם summary, participants, decisions, actionItems, language."
-- "איך להכריח Gemini להחזיר JSON תקין (response_mime_type/response_schema)?"
-- "תן דוגמה ל-UI נקי שמציג תמלול, סיכום, החלטות ומשימות."
-
-## איפה נתקעתי ואיך פתרתי
-- Gemini החזיר טקסט לא תקין JSON -> הוספתי response_schema ו-response_mime_type כדי לאכוף JSON קשיח.
-- טקסטים בעברית הוצגו כג'יבריש -> הוחלפו במחרוזות UTF-8 תקינות בפרונט ובבקאנד.
-
-## System Prompt ו-User Prompt
-System Prompt (שרת): נלקח מ-`backend/app/prompts/meeting_summary_system.txt`.
+## AI Usage (examples)
+System prompt crafted for structured output:
 ```text
-You are a concise meeting summarization assistant.
+You are a senior meeting summarization assistant for business meetings.
 
-Return valid JSON only, no markdown, no code fences, no extra keys.
+Return valid JSON only. No markdown, no code fences, no extra keys.
 
 Requirements:
 - Output must strictly match this schema: summary, participants, decisions, actionItems, language.
-- summary: 3-6 sentences, clear and neutral.
+- summary: 3-6 sentences, clear, neutral, and faithful to the transcript.
 - participants: list of participant names if explicitly mentioned; otherwise empty list.
-- decisions: bullet-like list of decisions made; otherwise empty list.
-- actionItems: list of actionable tasks with clear owner if mentioned; otherwise empty list.
-- language: "he" or "en" based on the transcript language.
-- If information is missing, use empty strings or empty lists (do not invent).
+- decisions: list of decisions made; otherwise empty list. One decision per array item.
+- actionItems: list of actionable tasks; include the owner only if explicitly mentioned (e.g., "Maya: send the report").
+- language: "he" or "en" based on the transcript language. Use the same language for all text fields.
+- If information is missing, use empty strings or empty lists. Do not invent or infer.
 
 Schema:
 {
@@ -42,17 +31,26 @@ Schema:
 }
 ```
 
-User Prompt (שרת): נבנה דינמית ב-`backend/app/services/summarize.py`.
+Why this prompt:
+- Forces JSON-only output to avoid post-processing errors.
+- Defines strict schema so the UI can render deterministically.
+- Enforces language consistency to keep RTL/LTR behavior predictable.
+- Prevents hallucinations by disallowing inference.
+
+Prompt used during development to validate JSON structure:
 ```text
-Language: {language}
-Transcript:
-{transcript}
+Fix the following content to valid JSON that matches the schema exactly. Return JSON only.
 ```
 
-## זמן עבודה בפועל
--  סה"כ זמן עבודה:  .
+Prompt idea used when improving the Word export formatting:
+```text
+Make the DOCX output more readable: add clear headings, bullet lists, and RTL alignment for Hebrew.
+```
 
-## שיפורים להמשך
-- תמיכה בשפות נוספות וזיהוי שפה חכם יותר.
-- הצגת confidence לתמלול.
-- הוספת בדיקות יחידה ל-parsing של JSON ול-API responses.
+## Blockers and Solutions
+- JSON output occasionally violated schema. Solved by enforcing `response_schema` and adding a retry fixer.
+- Word export looked too plain. Solved by adding headings, metadata, better fonts, and RTL alignment for Hebrew.
+- Missing API keys for demos. Solved by adding `MOCK_MODE` and deterministic mock payloads.
+
+## Actual Time Spent
+- ~5 hours.
