@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict
@@ -6,6 +7,18 @@ from typing import Any, Dict
 import google.generativeai as genai
 
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "meeting_summary_system.txt"
+LOGGER = logging.getLogger(__name__)
+SUMMARY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "participants": {"type": "array", "items": {"type": "string"}},
+        "decisions": {"type": "array", "items": {"type": "string"}},
+        "actionItems": {"type": "array", "items": {"type": "string"}},
+        "language": {"type": "string"},
+    },
+    "required": ["summary", "participants", "decisions", "actionItems", "language"],
+}
 
 
 class SummarizationError(Exception):
@@ -26,8 +39,20 @@ def _build_user_prompt(transcript: str, language: str) -> str:
     )
 
 
+def _strip_json_fences(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
 def _parse_json(raw: str) -> Dict[str, Any]:
-    return json.loads(raw)
+    return json.loads(_strip_json_fences(raw))
 
 
 def _normalize_payload(payload: Dict[str, Any], language: str) -> Dict[str, Any]:
@@ -52,19 +77,24 @@ def _default_response(language: str) -> Dict[str, Any]:
 
 def _mock_response(language: str) -> Dict[str, Any]:
     return {
-        "summary": "הפגישה התמקדה בבניית MVP למערכת תמלול וסיכום עם Whisper ו-Gemini, כולל UI נקי וייצוא Word.",
+        "summary": (
+            "דנו ביעדי ה-MVP למערכת תמלול וסיכום פגישות ובחלוקה בין רכיבי המערכת. "
+            "הוחלט להשתמש ב-Whisper לתמלול וב-Gemini לסיכום, עם UI ב-React ושרת FastAPI. "
+            "הוסכם שהמערכת תחזיר תמלול מלא, סיכום, משתתפים, החלטות ומשימות לביצוע. "
+            "נדרש גם ייצוא לקובץ Word והדגמה מקומית עם אפשרות ל-MOCK_MODE."
+        ),
         "participants": ["נועה", "אורן", "דניאל"],
         "decisions": [
-            "שימוש ב-FastAPI ו-React למימוש ה-MVP.",
-            "Whisper API לתמלול עם MOCK_MODE לגיבוי.",
-            "Gemini כברירת מחדל עם שכבת LLMClient קטנה להחלפה עתידית.",
-            "פלט JSON קשיח עם ריטריי אחד לתיקון פורמט.",
+            "ה-MVP יכלול React בפרונט ו-FastAPI בבקאנד.",
+            "תמלול יתבצע באמצעות Whisper עם אפשרות MOCK_MODE לדמו.",
+            "סיכום יתבצע באמצעות Gemini ויוחזר כ-JSON תקין.",
+            "נוסיף ייצוא לקובץ Word מתוך ממשק המשתמש.",
         ],
         "actionItems": [
-            "נועה: כתיבת System Prompt.",
-            "אורן: מימוש routes ושירותים ב-backend.",
-            "דניאל: בניית UI והוספת הודעות שגיאה ידידותיות.",
-            "הכנת README ו-PROCESS.md להדגמה.",
+            "נועה: לנסח System Prompt איכותי לסיכום.",
+            "אורן: לממש את ה-routes ושירותי הבקאנד.",
+            "דניאל: לבנות UI נקי להצגת תמלול וסיכום.",
+            "צוות: להשלים README ו-PROCESS.md עם הוראות והרצת דמו.",
         ],
         "language": language,
     }
@@ -82,7 +112,11 @@ async def summarize_meeting(transcript: str, language_hint: str | None) -> Dict[
 
     genai.configure(api_key=api_key)
     model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-    model = genai.GenerativeModel(model_name=model_name)
+    generation_config = {
+        "response_mime_type": "application/json",
+        "response_schema": SUMMARY_SCHEMA,
+    }
+    model = genai.GenerativeModel(model_name=model_name, generation_config=generation_config)
 
     system_prompt = _load_system_prompt()
     user_prompt = _build_user_prompt(transcript, language)
@@ -104,9 +138,13 @@ async def summarize_meeting(transcript: str, language_hint: str | None) -> Dict[
             "Return JSON only.\n\n"
             f"{raw_text}"
         )
+        LOGGER.warning("Invalid JSON from LLM (first pass). raw_text=%s", raw_text[:1000])
         fix_response = model.generate_content([system_prompt, fix_prompt])
         try:
             payload = _parse_json(fix_response.text or "")
             return _normalize_payload(payload, language)
         except json.JSONDecodeError:
+            LOGGER.warning(
+                "Invalid JSON from LLM (retry). raw_text=%s", (fix_response.text or "")[:1000]
+            )
             raise SummarizationError("LLM returned invalid JSON after retry.")
