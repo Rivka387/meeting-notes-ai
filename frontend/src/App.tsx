@@ -1,14 +1,16 @@
-import { useMemo, useState } from 'react'
-
-type Language = 'he' | 'en'
-
-type SummaryPayload = {
-  summary: string
-  participants: string[]
-  decisions: string[]
-  actionItems: string[]
-  language: Language
-}
+import { useEffect, useMemo, useState } from 'react'
+import ActionItemsCard from './components/ActionItemsCard'
+import DecisionsCard from './components/DecisionsCard'
+import ExportBar from './components/ExportBar'
+import Header from './components/Header'
+import ParticipantsCard from './components/ParticipantsCard'
+import ProgressStepper from './components/ProgressStepper'
+import ResultsTabs from './components/ResultsTabs'
+import SummaryCard from './components/SummaryCard'
+import Toast from './components/Toast'
+import TranscriptView from './components/TranscriptView'
+import UploadPanel from './components/UploadPanel'
+import { Language, SummaryPayload } from './types'
 
 const defaultSummary: SummaryPayload = {
   summary: '',
@@ -18,9 +20,12 @@ const defaultSummary: SummaryPayload = {
   language: 'he',
 }
 
-const toTitle = (text: string) => (text.length ? text : '—')
-
 const detectRtl = (language: Language) => (language === 'he' ? 'rtl' : 'ltr')
+
+type ToastState = {
+  message: string
+  tone?: 'success' | 'error' | 'info'
+} | null
 
 export default function App() {
   const envApiBase = import.meta.env.VITE_API_BASE_URL as string | undefined
@@ -33,7 +38,10 @@ export default function App() {
   const [summary, setSummary] = useState<SummaryPayload>(defaultSummary)
   const [loading, setLoading] = useState(false)
   const [stage, setStage] = useState<'idle' | 'transcribing' | 'summarizing'>('idle')
-  const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<ToastState>(null)
+  const [actionChecks, setActionChecks] = useState<Record<number, boolean>>({})
+  const [activeTab, setActiveTab] = useState('summary')
+  const [searchQuery, setSearchQuery] = useState('')
 
   const hasSummary = useMemo(
     () =>
@@ -46,6 +54,37 @@ export default function App() {
     [summary]
   )
 
+  useEffect(() => {
+    setActionChecks({})
+  }, [summary.actionItems])
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(null), 3200)
+    return () => window.clearTimeout(timer)
+  }, [toast])
+
+  const progressSteps = ['העלאה', 'תמלול', 'סיכום', 'מוכן']
+  const progressStep = useMemo(() => {
+    if (loading) {
+      return stage === 'transcribing' ? 1 : 2
+    }
+    if (hasSummary) return 3
+    if (file) return 0
+    return -1
+  }, [file, hasSummary, loading, stage])
+
+  const progressLabel = useMemo(() => {
+    if (loading && stage === 'transcribing') return 'מתבצע תמלול'
+    if (loading && stage === 'summarizing') return 'מתבצע סיכום'
+    if (hasSummary) return 'מוכן לצפייה והורדה'
+    if (file) return 'מוכן להתחלה'
+    return 'ממתין לקובץ'
+  }, [file, hasSummary, loading, stage])
+
+  const escapeIcsText = (value: string) =>
+    value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;')
+
   const persistApiBase = (value: string) => {
     setApiBase(value)
     localStorage.setItem('apiBase', value)
@@ -54,10 +93,11 @@ export default function App() {
   const handleUpload = async () => {
     if (!file) return
     setLoading(true)
-    setError(null)
+    setToast(null)
     setStage('transcribing')
     setSummary(defaultSummary)
     setTranscript('')
+    setActiveTab('summary')
 
     const formData = new FormData()
     formData.append('file', file)
@@ -97,9 +137,8 @@ export default function App() {
       setLanguage(summaryData.language || transcribeData.language || 'he')
       setStage('idle')
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'משהו השתבש בתהליך. בדקי שהשרת רץ ונסי שוב.'
-      setError(message)
+      const message = err instanceof Error ? err.message : 'קרתה שגיאה לא צפויה. נסו שוב.'
+      setToast({ message, tone: 'error' })
       setStage('idle')
     } finally {
       setLoading(false)
@@ -136,126 +175,172 @@ export default function App() {
       link.click()
       link.remove()
       window.URL.revokeObjectURL(url)
+      setToast({ message: 'קובץ Word הורד בהצלחה.', tone: 'success' })
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'לא ניתן להוריד את קובץ ה-Word. נסי שוב.'
-      setError(message)
+        err instanceof Error ? err.message : 'לא הצלחנו לייצא לקובץ Word. נסו שוב.'
+      setToast({ message, tone: 'error' })
     }
   }
 
+  const toggleAction = (index: number) => {
+    setActionChecks((prev) => ({ ...prev, [index]: !prev[index] }))
+  }
+
+  const handleCopyActions = async () => {
+    if (!summary.actionItems.length) return
+    const lines = summary.actionItems.map(
+      (item, index) => `${actionChecks[index] ? '[x]' : '[ ]'} ${item}`
+    )
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'))
+      setToast({ message: 'המשימות הועתקו ללוח.', tone: 'success' })
+    } catch {
+      setToast({ message: 'לא הצלחנו להעתיק. בדקו הרשאות דפדפן.', tone: 'error' })
+    }
+  }
+
+  const handleDownloadIcs = () => {
+    if (!summary.actionItems.length) return
+    const now = new Date()
+    const formatDate = (value: Date) =>
+      value.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+
+    const events = summary.actionItems
+      .map((item, index) => {
+        const start = new Date(now.getTime() + index * 60000)
+        return [
+          'BEGIN:VEVENT',
+          `UID:action-${index}-${now.getTime()}@meeting-notes-ai`,
+          `DTSTAMP:${formatDate(now)}`,
+          `DTSTART:${formatDate(start)}`,
+          'DURATION:PT30M',
+          `SUMMARY:${escapeIcsText(item)}`,
+          'END:VEVENT',
+        ].join('\n')
+      })
+      .join('\n')
+
+    const content = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Meeting Notes AI//EN',
+      events,
+      'END:VCALENDAR',
+    ].join('\n')
+
+    const blob = new Blob([content], { type: 'text/calendar;charset=utf-8' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'meeting-action-items.ics'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+    setToast({ message: 'נוצר קובץ ICS למשימות.', tone: 'success' })
+  }
+
+  const tabs = [
+    { id: 'summary', label: 'סיכום' },
+    { id: 'actionItems', label: 'משימות', count: summary.actionItems.length },
+    { id: 'decisions', label: 'החלטות', count: summary.decisions.length },
+    { id: 'participants', label: 'משתתפים', count: summary.participants.length },
+    { id: 'transcript', label: 'תמלול' },
+  ]
+
   return (
     <div className="app" dir={detectRtl(language)}>
-      <div className="glow" aria-hidden="true" />
-      <header className="hero">
-        <div className="hero-content">
-          <p className="eyebrow">Meeting Notes AI</p>
-          <h1>תמלול וסיכום פגישות ברמה של מוצר</h1>
-          <p className="subtitle">
-            העלי הקלטה וקבלי תמלול מלא, החלטות, משימות וסיכום חד ומקצועי.
-          </p>
-        </div>
-        <div className="hero-card">
-          <h2>התחלה מהירה</h2>
-          <p>בחרי קובץ אודיו והגדירי כתובת API.</p>
-          <label className="file-drop">
-            <input
-              type="file"
-              accept="audio/*"
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-            />
-            <span>{file ? file.name : 'בחרי קובץ אודיו (wav/mp3)'}</span>
-          </label>
-          <label className="field">
-            API Base URL
-            <input
-              type="text"
-              value={apiBase}
-              onChange={(event) => persistApiBase(event.target.value)}
-              placeholder="http://localhost:8000"
-            />
-          </label>
-          <button className="primary" onClick={handleUpload} disabled={loading || !file}>
-            {loading
-              ? stage === 'transcribing'
-                ? 'מתמללת...'
-                : 'מסכמת...'
-              : 'התחילי תהליך'}
-          </button>
-          {error && (
-            <div className="toast" role="alert">
-              <div className="toast-dot" />
-              <div>
-                <div className="toast-title">יש לנו עדכון חשוב</div>
-                <div className="toast-body">{error}</div>
-              </div>
-              <button className="toast-close" onClick={() => setError(null)} aria-label="סגירה">
-                ✕
-              </button>
-            </div>
-          )}
-        </div>
-      </header>
+      <div className="bg-orb" aria-hidden="true" />
+      <Header
+        title="תמלול וסיכום פגישות בצורה חכמה"
+        subtitle="מעלים הקלטה ומקבלים תמלול מלא, סיכום תמציתי, החלטות ומשימות לביצוע."
+      />
 
-      <section className="panel">
+      <div className="layout">
+        <UploadPanel
+          fileName={file?.name ?? null}
+          apiBase={apiBase}
+          loading={loading}
+          stage={stage}
+          onFileChange={setFile}
+          onApiBaseChange={persistApiBase}
+          onStart={handleUpload}
+        />
+        <ProgressStepper steps={progressSteps} activeIndex={progressStep} label={progressLabel} />
+      </div>
+
+      <section className="panel results">
         <div className="panel-header">
-          <h2>תמלול מלא</h2>
+          <h2>תוצרים</h2>
           <span className="tag">{language === 'he' ? 'עברית' : 'English'}</span>
         </div>
-        <textarea value={transcript} readOnly placeholder="כאן יופיע התמלול המלא." />
+        <ResultsTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+
+        <div className="tab-panels">
+          <div
+            id="panel-summary"
+            role="tabpanel"
+            aria-labelledby="tab-summary"
+            hidden={activeTab !== 'summary'}
+          >
+            <SummaryCard summary={summary.summary} isLoading={loading} />
+          </div>
+          <div
+            id="panel-actionItems"
+            role="tabpanel"
+            aria-labelledby="tab-actionItems"
+            hidden={activeTab !== 'actionItems'}
+          >
+            <ActionItemsCard
+              items={summary.actionItems}
+              checks={actionChecks}
+              isLoading={loading}
+              notice={null}
+              onToggle={toggleAction}
+              onCopy={handleCopyActions}
+              onDownloadIcs={handleDownloadIcs}
+            />
+          </div>
+          <div
+            id="panel-decisions"
+            role="tabpanel"
+            aria-labelledby="tab-decisions"
+            hidden={activeTab !== 'decisions'}
+          >
+            <DecisionsCard decisions={summary.decisions} isLoading={loading} />
+          </div>
+          <div
+            id="panel-participants"
+            role="tabpanel"
+            aria-labelledby="tab-participants"
+            hidden={activeTab !== 'participants'}
+          >
+            <ParticipantsCard participants={summary.participants} isLoading={loading} />
+          </div>
+          <div
+            id="panel-transcript"
+            role="tabpanel"
+            aria-labelledby="tab-transcript"
+            hidden={activeTab !== 'transcript'}
+          >
+            <TranscriptView
+              transcript={transcript}
+              query={searchQuery}
+              isLoading={loading}
+              onQueryChange={setSearchQuery}
+            />
+          </div>
+        </div>
       </section>
 
-      <section className="grid">
-        <div className="card">
-          <h3>סיכום</h3>
-          <p>{toTitle(summary.summary)}</p>
-        </div>
-        <div className="card">
-          <h3>משתתפים</h3>
-          {summary.participants.length ? (
-            summary.participants.map((participant, index) => (
-              <span className="chip" key={index}>
-                {participant}
-              </span>
-            ))
-          ) : (
-            <p>—</p>
-          )}
-        </div>
-        <div className="card">
-          <h3>החלטות</h3>
-          {summary.decisions.length ? (
-            <ul>
-              {summary.decisions.map((decision, index) => (
-                <li key={index}>{decision}</li>
-              ))}
-            </ul>
-          ) : (
-            <p>—</p>
-          )}
-        </div>
-        <div className="card">
-          <h3>משימות לביצוע</h3>
-          {summary.actionItems.length ? (
-            <ul>
-              {summary.actionItems.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
-          ) : (
-            <p>—</p>
-          )}
-        </div>
-      </section>
+      <ExportBar disabled={!hasSummary} onExport={handleDownload} />
 
-      <section className="panel export">
-        <div>
-          <h2>ייצוא לקובץ Word</h2>
-          <p>תוכלי לשמור את הסיכום יחד עם התמלול המלא.</p>
+      {toast && (
+        <div className="toast-stack" aria-live="polite">
+          <Toast message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />
         </div>
-        <button className="primary" onClick={handleDownload} disabled={!hasSummary}>
-          הורדת קובץ Word
-        </button>
-      </section>
+      )}
     </div>
   )
 }

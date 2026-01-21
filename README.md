@@ -2,6 +2,10 @@
 
 Monorepo with a FastAPI backend and a lightweight React UI (CDN-based) for audio transcription and meeting summaries.
 
+## Deliverables
+- GitHub repo: https://github.com/Rivka387/meeting-notes-ai
+- Live demo (or local demo instructions): https://meeting-notes-ai.onrender.com/
+
 ## Quick Start
 
 ### Backend
